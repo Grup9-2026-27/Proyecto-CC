@@ -1,0 +1,173 @@
+import serial  # Comunicación con el Arduino por el puerto serie.
+import threading  # Permite leer datos en segundo plano sin congelar la ventana.
+from queue import Empty, Queue  # Cola para compartir las temperaturas entre tareas.
+from tkinter import *  # Herramientas para crear la ventana y sus controles.
+from matplotlib.figure import Figure  # Figura que contendrá el gráfico.
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # Integra Matplotlib con Tkinter.
+
+# Puerto al que está conectado el Arduino; puede cambiar en cada ordenador.
+device = 'COM3'
+# La velocidad debe coincidir con la configurada en el programa del Arduino.
+mySerial = serial.Serial(device, baudrate=9600)
+
+# Cada punto del gráfico tendrá un número de lectura (eje X) y una temperatura (eje Y).
+temperaturas = []
+eje_x = []
+# El hilo de lectura pone aquí los datos; Tkinter los recoge para dibujarlos con seguridad.
+temperaturas_pendientes = Queue()
+# Se dejan vacíos para que la gráfica no se cree hasta pulsar "Iniciar".
+canvas = None
+ax = None
+plot_line = None
+# Estos indicadores impiden iniciar varias veces las mismas tareas al repetir clics.
+recepcion_iniciada = False
+actualizacion_programada = False
+
+
+def recepcion():
+    # Lee continuamente los mensajes enviados por el Arduino.
+    # Se ejecuta en segundo plano para que la ventana siga respondiendo.
+    global mySerial
+    
+    while True:
+        # in_waiting indica cuántos bytes están esperando para ser leídos.
+        if mySerial.in_waiting > 0:
+            # Lee una línea, convierte los bytes a texto y elimina el salto final.
+            line = mySerial.readline().decode('utf-8').rstrip()
+            # Muestra el mensaje recibido también en la consola.
+            print(line)
+            # Por ejemplo, "T:24.5" se convierte en ["T", "24.5"].
+            trozos = line.split(':')
+            
+            # Solo procesa mensajes que empiezan por "T" y contienen un valor.
+            if len(trozos) >= 2 and trozos[0] == 'T':
+                # El dato llega como texto; se convierte a número decimal.
+                temperatura = float(trozos[1])
+                # Deja el valor en la cola para que el hilo de Tkinter lo dibuje.
+                temperaturas_pendientes.put(temperatura)
+
+
+def actualizar_grafica():
+    # Tkinter llama a esta función cada 100 ms para revisar si hay datos nuevos.
+    # Procesa todas las temperaturas que se hayan acumulado antes de redibujar.
+    while True:
+        try:
+            # Obtiene el dato sin esperar; la ventana no se queda detenida si no hay datos.
+            temperatura = temperaturas_pendientes.get_nowait()
+        except Empty:
+            # La cola está vacía: termina este ciclo de lectura.
+            break
+
+        # Usa el número de puntos existentes como índice de la nueva lectura.
+        eje_x.append(len(eje_x))
+        # Guarda la temperatura que se usará como valor vertical del punto.
+        temperaturas.append(temperatura)
+        # Actualiza los puntos de la línea roja que ya está creada.
+        plot_line.set_data(eje_x, temperaturas)
+        # Cambia el título para mostrar el número de la última lectura.
+        ax.set_title(str(eje_x[-1]))
+
+    # Solicita a Matplotlib que redibuje el canvas cuando Tkinter pueda hacerlo.
+    canvas.draw_idle()
+    # Programa la siguiente revisión dentro de 100 milisegundos (0,1 segundos).
+    window.after(100, actualizar_grafica)
+
+def InClick ():
+    # "global" permite guardar aquí el gráfico y los indicadores definidos arriba.
+    global canvas, ax, plot_line, recepcion_iniciada, actualizacion_programada
+
+    # En el primer clic crea la gráfica; los siguientes clics reutilizan el mismo canvas.
+    if canvas is None:
+        # Crea el área completa del gráfico y añade un conjunto de ejes.
+        figure = Figure(figsize=(6, 3), dpi=100)
+        ax = figure.add_subplot(111)
+        # Define el rango visible: hasta 100 lecturas y temperaturas entre 20 y 30.
+        ax.set(xlim=(0, 100), ylim=(20, 30))
+        # Crea una línea roja vacía que se irá rellenando con los datos.
+        plot_line, = ax.plot([], [], 'r-')
+
+        # Prepara el canvas: el puente que permite mostrar Matplotlib en Tkinter.
+        canvas = FigureCanvasTkAgg(figure, master=graph_frame)
+        # Dibuja la figura inicial y obtiene el widget que Tkinter puede colocar.
+        canvas.draw()
+        canvas_graph = canvas.get_tk_widget()
+        # Define el tamaño inicial y coloca el canvas en el frame de la gráfica.
+        canvas_graph.config(width=600, height=300)
+        canvas_graph.grid(row=0, column=0, padx=5, pady=5, sticky=N + S + E + W)
+
+    # Inicia las revisiones periódicas de la cola, pero solo una vez.
+    if not actualizacion_programada:
+        actualizacion_programada = True
+        window.after(100, actualizar_grafica)
+
+    # Inicia un único hilo para leer el Arduino sin bloquear la interfaz.
+    if not recepcion_iniciada:
+        threadRecepcion = threading.Thread(target=recepcion, daemon=True)
+        threadRecepcion.start()
+        # Recuerda que el lector ya está funcionando para no iniciar otro hilo.
+        recepcion_iniciada = True
+
+    print('Recepció iniciada')
+ 
+    
+
+def PaClick ():
+    # Envía al Arduino el comando para detener temporalmente la adquisición.
+    # El texto debe coincidir con el comando que el programa del Arduino reconoce.
+    mensaje = "Parar\n"
+    mySerial.write(mensaje.encode('utf-8'))
+
+
+def ReClick ():
+    # Envía al Arduino el comando para reanudar la adquisición de datos.
+    mensaje = "Reanudar\n"
+    mySerial.write(mensaje.encode('utf-8'))
+
+
+# Crea la ventana principal, que contendrá todos los demás elementos.
+window = Tk()
+window.geometry("1200x600")
+# La ventana usa filas y columnas. El peso permite que se expandan al cambiar
+# el tamaño de la ventana.
+window.rowconfigure(0, weight=1)
+window.rowconfigure(1, weight=1)
+
+window.columnconfigure(0, weight=1)
+window.columnconfigure(1, weight=1)
+window.columnconfigure(2, weight=1)
+window.columnconfigure(3, weight=10)
+
+# Crea el texto del título y lo coloca en la cuadrícula de la ventana.
+tituloLabel = Label(window, text = "Mando de sensor de temperatura", font=("Courier", 20, "italic"))
+tituloLabel.grid(row=0, column=0, columnspan=1, padx=5, pady=5, sticky=N + S + E + W)
+
+# Crea un recuadro con título para agrupar los botones de control.
+button_graph_frame = LabelFrame(window, text ='Botones de control de la gráfica')
+button_graph_frame.grid(row=1, column=0, columnspan=1, padx=5, pady=5, sticky=N + S + E + W)
+# Hace que las tres columnas del recuadro puedan repartirse el espacio.
+button_graph_frame.rowconfigure(0, weight=1)
+button_graph_frame.columnconfigure(0, weight=1)
+button_graph_frame.columnconfigure(1, weight=1)
+button_graph_frame.columnconfigure(2, weight=1)
+
+# Crea los botones. "command" indica qué función se ejecutará al hacer clic.
+InButton = Button(button_graph_frame, text="Iniciar", bg='lime', fg="black",command=InClick)
+InButton.grid(row=0, column=0, padx=5, pady=5, sticky=N + S + E + W)
+
+PaButton = Button(button_graph_frame, text="Pausar", bg='red', fg="black",command=PaClick)
+PaButton.grid(row=0, column=1, padx=5, pady=5, sticky=N + S + E + W)
+
+ReButton = Button(button_graph_frame, text="Reanudar", bg='orange', fg="black",command=ReClick)
+ReButton.grid(row=0, column=2, padx=5, pady=5, sticky=N + S + E + W)
+
+# Crea el recuadro para la gráfica. Al abrir la ventana estará vacío:
+# el canvas se añade al recuadro al pulsar "Iniciar".
+graph_frame = LabelFrame(window, text ='Gráfica')
+# Coloca el recuadro a la derecha y permite que crezca con la ventana.
+graph_frame.grid(row=0, column=1, columnspan=3, rowspan=2, padx=5, pady=5, sticky=N + S + E + W)
+# Permite que el canvas ocupe el espacio disponible dentro del recuadro.
+graph_frame.rowconfigure(0, weight=1)
+graph_frame.columnconfigure(0, weight=1)
+
+# Inicia el bucle de Tkinter: muestra la ventana y espera clics y otros eventos.
+window.mainloop()
