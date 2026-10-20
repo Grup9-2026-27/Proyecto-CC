@@ -1,3 +1,7 @@
+INTRODUCCIÓN:
+
+Somos el grupo 9, integrado por Pau Gabrysiak, Néstor Lombarte e Irati Vinyets. Esta entrega es la Versión 1 del proyecto realizado en clase.
+
 INFORMACIÓN SOBRE LA ENTREGA:
 
 El objetivo de este proyecto es desarrollar una simulación de un sistema de comunicación entre un satélite y una estación de tierra mediante el uso de programación en Python y Arduino. El sistema permite simular el envío de información sobre las condiciones de temperatura y humedad del satélite, así como la comunicación entre ambos dispositivos.
