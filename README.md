@@ -36,6 +36,8 @@ El uso de la IA se ha estructurado en los siguientes puntos clave:
 
 - Detección de errores: Utilizamos la IA como asistente de depuración cuando el código presentaba fallos. La IA nos ayudó a identificar posibles orígenes del problema y nos ofreció alternativas para solucionarlos.
 
+- Comentarios: Hemos utilizado la Inteligencia Artificial para ayudarnos a redactar los comentarios del código de Python ya que, debido a su complejidad, consideramos que requería explicaciones detalladas. Para ello, hemos consultado el funcionamiento de algunas funciones y utilizado las explicaciones obtenidas para documentar el código de forma clara y extensa, facilitando su comprensión.
+
 En conclusión, la Inteligencia Artificial ha actuado como una herramienta de ayuda cuando encontrábamos errores de código y nos ha permitido entender en profundidad el funcionamiento de este.
 
 ENLACE DE VÍDEO
