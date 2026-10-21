@@ -46,4 +46,4 @@ En conclusión, la Inteligencia Artificial ha actuado como una herramienta de ay
 
 ENLACE DE VÍDEO
 
-https://youtu.be/tYGMPzBoS6g
+https://drive.google.com/file/d/1pXefoQ6epbVQrOdJW47xA1U6bL2vYG8u/view?usp=drive_link
