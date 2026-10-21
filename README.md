@@ -4,6 +4,7 @@ Somos el grupo 9, integrado por Pau Gabrysiak, Néstor Lombarte e Irati Vinyets.
 
 <img width="303.2" height="202.4" alt="IMG_4285" src="https://github.com/user-attachments/assets/50ac5124-b5fe-4102-b2ae-ab16fe377565" />
 
+
 INFORMACIÓN SOBRE LA ENTREGA:
 
 El objetivo de este proyecto es desarrollar una simulación de un sistema de comunicación entre un satélite y una estación de tierra mediante el uso de programación en Python y Arduino. El sistema permite simular el envío de información sobre las condiciones de temperatura y humedad del satélite, así como la comunicación entre ambos dispositivos.
