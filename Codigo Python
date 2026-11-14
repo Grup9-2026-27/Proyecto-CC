@@ -5,8 +5,8 @@ from tkinter import *  # Herramientas para crear la ventana y sus controles.
 from matplotlib.figure import Figure  # Figura que contendrá el gráfico.
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # Integra Matplotlib con Tkinter.
 
-# Puerto al que está conectado el Arduino; puede cambiar en cada ordenador.
-device = 'COM3'
+# Puerto al que está conectado el Arduino
+device = 'COM6'
 # La velocidad debe coincidir con la configurada en el programa del Arduino.
 mySerial = serial.Serial(device, baudrate=9600)
 
