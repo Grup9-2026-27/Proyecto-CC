@@ -9,42 +9,53 @@ DHT dht(DHTPIN, DHTTYPE);
 
 SoftwareSerial mySerial(10, 11);  // RX, TX
 
+// Configuración para el sensor de humedad y temperatura
 long nextMillis1;
 const long interval1 = 3000;  // 3 segundos para el sensor de H y T
 
-long nextMillis2;
-const long interval2 = 1000;  // 1 segundos para el sensor ultrasónico
-
+// Configuración para el LED
 const int ledtr = 13;  // LED en el pin 13
 long nextMillisLed;  // Momento (en ms) en que se debe apagar el LED
+bool ledEncendido = false;  // Indica si el LED está encendido esperando a ser apagado
+bool esperandoTimeout = false;  // Indica si estamos esperando a confirmar que el sensor falla
+long nextTimeoutHT;  // Momento (en ms) en que se confirma el fallo del sensor si sigue sin leerse bien
 
 // Variable para controlar si el satélite tiene que enviar datos o no
 bool enviarDatos = true;
+
+// Configuración para el latido
+long nextMillisHB;  // Momento (en ms) en que toca enviar el siguiente latido
+const long intervalHB = 2000;  // Un latido cada 2 segundos (menor que el timeout de 5 s de tierra)
+
+// Configuración para el sensor ultrasónico
+long nextMillis2;
+const long interval2 = 1000;  // 1 segundos para el sensor ultrasónico
 
 // Variables para controlar el disparo del ultrasónico sin ningún delay (máquina de estados)
 int estadoUltrasonico = 0;          // 0: esperando intervalo, 1: limpiando Trig, 2: enviando pulso de 10 microsegundos
 unsigned long nextMicrosTrig = 0;   // Marca de tiempo en microsegundos para controlar la duración del pulso
 
-
 void setup() {
   Serial.begin(9600);
   mySerial.begin(9600);
   dht.begin();
+
   nextMillis1 = millis() + interval1;  // Configuración para el tiempo del sensor
   nextMillis2 = millis() + interval2;  // Configuración para el tiempo del sensor ultrasónico
+  nextMillisHB = millis() + intervalHB;  // Programa el primer latido
 
-  pinMode(ledtr, OUTPUT);
+  pinMode(ledtr, OUTPUT); 
   pinMode(TRIGPIN, OUTPUT);
   pinMode(ECHOPIN, INPUT);
-
 }
 
 void loop() {
   // Apagar el LED cuando haya pasado el tiempo, sin bloquear el programa
-    if (ledEncendido && millis() >= nextMillisLed) {
-      digitalWrite(ledre, LOW);  // Apaga el LED
-      ledEncendido = false;  // Marca el LED como apagado
-
+  if (ledEncendido && millis() >= nextMillisLed) {
+    digitalWrite(ledtr, LOW);  // Apaga el LED
+    ledEncendido = false;  // Marca el LED como apagado
+  }
+  
   // Recibir y procesar las órdenes de tierra
   if (mySerial.available()) {
     String mensajePC = mySerial.readString();
@@ -57,6 +68,12 @@ void loop() {
     }
   }
 
+  // Latido: se envía siempre, aunque enviarDatos sea false, para que tierra sepa que el satélite sigue vivo
+  if (millis() >= nextMillisHB) {
+    mySerial.println("Latido");  // Mensaje de latido
+    nextMillisHB = millis() + intervalHB;  // Programa el siguiente latido
+  }
+
   // Configuración del sensor de humedad y temperatura
   if (millis() >= nextMillis1) {
     if (enviarDatos == true) {
@@ -64,22 +81,33 @@ void loop() {
       float t = dht.readTemperature();  //devuelve la temperatura en grados Celsius
       // Si no se puede leer la humedad o la temperatura, las funciones devuelven NAN
       if (isnan(h) || isnan(t)) {  //isnan() comprueba si dan NAN | \t es un carácter de tabulación, que nos permite alinear los datos en el monitor serie |
+        if (!esperandoTimeout) {  // Solo fijamos el tiempo límite la primera vez que falla la lectura
+          esperandoTimeout = true;  // Empezamos a esperar para confirmar el fallo
+          nextTimeoutHT = millis() + 5000; // 5 segundos
+        }
         mySerial.println("Error al leer el sensor DHT11");
-      } else {
+      }
+       else {
+        esperandoTimeout = false;
         mySerial.print("T:");
         mySerial.print(t);
         mySerial.print(":H:");
-        mySerial.print(h);
+        mySerial.println(h);
         digitalWrite(ledtr, HIGH);
         ledEncendido = true;  // Marca el LED como encendido para que el loop lo apague después
         nextMillisLed = millis() + 100;  // Programa el apagado del LED dentro de 100 ms
-        
       }
     }
+    
+    // Si han pasado 5 segundos con el sensor fallando, avisamos a tierra con "Fallo"
+    if (esperandoTimeout && (millis() >= nextTimeoutHT)){
+      mySerial.println ("Fallo");
+    }
+    
     nextMillis1 = millis() + interval1;
   }
 
-  // Configuración del sensor ultrasónico (0% delays, usando micros() y millis())
+  // Configuración del sensor ultrasónico
   // PASO 1 (Estado 0): Esperar a que pase 1 segundo para iniciar una nueva medición
   if (estadoUltrasonico == 0 && millis() >= nextMillis2) {
     digitalWrite(TRIGPIN, LOW);        // Asegura que el pin Trig empiece apagado para evitar ruido
