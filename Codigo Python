@@ -1,173 +1,290 @@
 import serial  # Comunicación con el Arduino por el puerto serie.
 import threading  # Permite leer datos en segundo plano sin congelar la ventana.
+import time  # Para medir el tiempo transcurrido y que el eje X avance también durante la pausa.
+from tkinter import messagebox  # Para mostrar la ventana de alarma con el botón OK.
 from queue import Empty, Queue  # Cola para compartir las temperaturas entre tareas.
 from tkinter import *  # Herramientas para crear la ventana y sus controles.
 from matplotlib.figure import Figure  # Figura que contendrá el gráfico.
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # Integra Matplotlib con Tkinter.
 
-# Puerto al que está conectado el Arduino
-device = 'COM6'
-# La velocidad debe coincidir con la configurada en el programa del Arduino.
-mySerial = serial.Serial(device, baudrate=9600)
+# Puerto al que está conectado el Arduino; puede cambiar en cada ordenador.
+device = 'COM8'
+mySerial = serial.Serial(device, baudrate=9600)  # Abre la conexión serie a 9600 baudios
 
-# Cada punto del gráfico tendrá un número de lectura (eje X) y una temperatura (eje Y).
+# Listas para almacenar el historial de puntos representados en las gráficas
 temperaturas = []
+medias = []
 eje_x = []
-# El hilo de lectura pone aquí los datos; Tkinter los recoge para dibujarlos con seguridad.
+
+# Colas seguras entre hilos (thread-safe) para pasar datos desde el hilo serie a la interfaz gráfica
 temperaturas_pendientes = Queue()
-# Se dejan vacíos para que la gráfica no se cree hasta pulsar "Iniciar".
+alarmas_pendientes = Queue()
+
+# Banderas para evitar abrir múltiples ventanas emergentes repetidas por un mismo fallo continuo
+alarma_sensor_activa = False
+alarma_com_activa = False
+alarma_dist_activa = False
+
+# Referencias globales a los objetos de la gráfica Matplotlib
 canvas = None
 ax = None
+ax_media = None
 plot_line = None
-# Estos indicadores impiden iniciar varias veces las mismas tareas al repetir clics.
+plot_line_media = None
+
+# Banderas de control para asegurar que el hilo de lectura y el refresco de gráfica se lancen una sola vez
 recepcion_iniciada = False
 actualizacion_programada = False
 
+INTERVALO = 3      # Intervalo esperado (en segundos) entre lecturas del satélite para escalar el eje X
+t_inicio = None    # Marca de tiempo del primer dato recibido para calcular el tiempo relativo
 
+# Variables para el cálculo de la media móvil y control de sobretemperatura cuando se calcula en tierra
+ultimas_10 = []
+limite_temp = 30.0
+consecutivas_sup = 0
+
+
+# Función que se ejecuta en un hilo secundario leyendo continuamente los datos de la estación de tierra
 def recepcion():
-    # Lee continuamente los mensajes enviados por el Arduino.
-    # Se ejecuta en segundo plano para que la ventana siga respondiendo.
-    global mySerial
+    global mySerial, t_inicio, alarma_sensor_activa, alarma_com_activa, alarma_dist_activa, consecutivas_sup
     
     while True:
-        # in_waiting indica cuántos bytes están esperando para ser leídos.
-        if mySerial.in_waiting > 0:
-            # Lee una línea, convierte los bytes a texto y elimina el salto final.
-            line = mySerial.readline().decode('utf-8').rstrip()
-            # Muestra el mensaje recibido también en la consola.
+        if mySerial.in_waiting > 0:  # Comprueba si hay bytes esperando en el búfer del puerto serie
+            line = mySerial.readline().decode('utf-8', errors='ignore').rstrip()  # Lee y decodifica una línea completa
             print(line)
-            # Por ejemplo, "T:24.5" se convierte en ["T", "24.5"].
-            trozos = line.split(':')
+            trozos = line.split(':')  # Divide la trama recibida usando ':' como separador
             
-            # Solo procesa mensajes que empiezan por "T" y contienen un valor.
-            if len(trozos) >= 2 and trozos[0] == 'T':
-                # El dato llega como texto; se convierte a número decimal.
+            # Código 1: recepción de temperatura y humedad (formato 1:temp:hum o 1:temp:hum:media)
+            if len(trozos) >= 3 and trozos[0] == '1':
+                alarma_sensor_activa = False  # Restablece la alarma del DHT11 si llegan datos válidos
                 temperatura = float(trozos[1])
-                # Deja el valor en la cola para que el hilo de Tkinter lo dibuje.
-                temperaturas_pendientes.put(temperatura)
+                humedad = float(trozos[2])
+
+                if len(trozos) >= 4:
+                    # Si la trama trae 4 campos, la media ya viene calculada desde el satélite
+                    media = float(trozos[3])
+                else:
+                    # Si trae 3 campos, Python calcula la media móvil de las últimas 10 muestras
+                    ultimas_10.append(temperatura)
+                    if len(ultimas_10) > 10:
+                        ultimas_10.pop(0)  # Elimina la muestra más antigua para mantener máximo 10
+                    media = sum(ultimas_10) / len(ultimas_10)
+
+                    # Comprueba si la media supera el límite 3 veces consecutivas
+                    if media > limite_temp:
+                        consecutivas_sup += 1
+                        if consecutivas_sup >= 3:
+                            alarmas_pendientes.put(f"3 medias consecutivas superiores al límite ({limite_temp} °C).")
+                            mySerial.write("2:\n".encode('utf-8'))  # Ordena activar el zumbador en tierra
+                            consecutivas_sup = 0
+                    else:
+                        consecutivas_sup = 0
+
+                if t_inicio is None:
+                    t_inicio = time.time()  # Fija el instante cero al recibir el primer dato
+                x = (time.time() - t_inicio) / INTERVALO  # Calcula la posición en el eje X según el tiempo real
+                temperaturas_pendientes.put((x, temperatura, media))  # Envía el punto a la cola de la gráfica
+
+            # Código 2: alarma de sobretemperatura detectada directamente por el satélite
+            elif len(trozos) >= 1 and trozos[0] == '2':
+                alarmas_pendientes.put(f"Satélite: 3 medias consecutivas superiores al límite ({limite_temp} °C).")
+
+            # Código 3: fallo confirmado del sensor DHT11
+            elif len(trozos) >= 1 and trozos[0] == '3':
+                if not alarma_sensor_activa:
+                    alarma_sensor_activa = True
+                    alarmas_pendientes.put("Fallo en el sensor de temperatura y humedad (DHT11).")
+
+            # Código 6: pérdida de enlace con el satélite (más de 5 s sin recibir tramas)
+            elif len(trozos) >= 1 and trozos[0] == '6':
+                if not alarma_com_activa:
+                    alarma_com_activa = True
+                    alarmas_pendientes.put("Se ha perdido la comunicación con el satélite.")
+
+            # Código 8: enlace con el satélite recuperado
+            elif len(trozos) >= 1 and trozos[0] == '8':
+                alarma_com_activa = False
+
+            # Código 11: telemetría del radar ultrasónico (11:ángulo:distancia)
+            elif len(trozos) >= 3 and trozos[0] == '11':
+                if trozos[2] != '0':  # Si la distancia es distinta de 0, el sensor vuelve a funcionar bien
+                    alarma_dist_activa = False
+
+            # Código 13: fallo confirmado del sensor ultrasónico HC-SR04
+            elif len(trozos) >= 1 and trozos[0] == '13':
+                if not alarma_dist_activa:
+                    alarma_dist_activa = True
+                    alarmas_pendientes.put("Fallo en el sensor de distancia (HC-SR04).")
 
 
+# Extrae los puntos pendientes de la cola y actualiza las dos gráficas periódicamente
 def actualizar_grafica():
-    # Tkinter llama a esta función cada 100 ms para revisar si hay datos nuevos.
-    # Procesa todas las temperaturas que se hayan acumulado antes de redibujar.
     while True:
         try:
-            # Obtiene el dato sin esperar; la ventana no se queda detenida si no hay datos.
-            temperatura = temperaturas_pendientes.get_nowait()
+            x, temperatura, media = temperaturas_pendientes.get_nowait()  # Extrae punto sin bloquear
         except Empty:
-            # La cola está vacía: termina este ciclo de lectura.
-            break
+            break  # Sale del bucle cuando ya no quedan puntos pendientes
 
-        # Usa el número de puntos existentes como índice de la nueva lectura.
-        eje_x.append(len(eje_x))
-        # Guarda la temperatura que se usará como valor vertical del punto.
+        # Si hubo una pausa prolongada (salto > 1.5 intervalos), inserta un hueco (NaN) para cortar la línea
+        if eje_x and x - eje_x[-1] > 1.5:
+            eje_x.append(eje_x[-1] + 1)
+            temperaturas.append(float('nan'))
+            medias.append(float('nan'))
+
+        # Añade los nuevos valores a las listas y actualiza los datos de ambas curvas
+        eje_x.append(x)
         temperaturas.append(temperatura)
-        # Actualiza los puntos de la línea roja que ya está creada.
+        medias.append(media)
         plot_line.set_data(eje_x, temperaturas)
-        # Cambia el título para mostrar el número de la última lectura.
-        ax.set_title(str(eje_x[-1]))
+        plot_line_media.set_data(eje_x, medias)
+        ax.set_title("Temperatura (lectura " + str(int(eje_x[-1])) + ")")
 
-    # Solicita a Matplotlib que redibuje el canvas cuando Tkinter pueda hacerlo.
-    canvas.draw_idle()
-    # Programa la siguiente revisión dentro de 100 milisegundos (0,1 segundos).
-    window.after(100, actualizar_grafica)
+    canvas.draw_idle()  # Redibuja el lienzo de forma eficiente
+    window.after(100, actualizar_grafica)  # Vuelve a programar esta función dentro de 100 ms
 
-def InClick ():
-    # "global" permite guardar aquí el gráfico y los indicadores definidos arriba.
-    global canvas, ax, plot_line, recepcion_iniciada, actualizacion_programada
 
-    # En el primer clic crea la gráfica; los siguientes clics reutilizan el mismo canvas.
+# Comprueba cada 200 ms si hay alarmas en la cola para mostrarlas en ventana emergente
+def revisar_alarmas():
+    try:
+        texto = alarmas_pendientes.get_nowait()
+    except Empty:
+        texto = None
+    if texto is not None:
+        messagebox.showerror("ALARMA", texto)  # Bloquea hasta que el usuario pulsa OK
+        mySerial.write("7:\n".encode('utf-8'))  # Envía código 7 para silenciar el zumbador en tierra
+    window.after(200, revisar_alarmas)
+
+
+# Acción del botón "Iniciar": crea las gráficas si no existen y arranca la recepción
+def InClick():
+    global canvas, ax, ax_media, plot_line, plot_line_media, recepcion_iniciada, actualizacion_programada
+
     if canvas is None:
-        # Crea el área completa del gráfico y añade un conjunto de ejes.
-        figure = Figure(figsize=(6, 3), dpi=100)
-        ax = figure.add_subplot(111)
-        # Define el rango visible: hasta 100 lecturas y temperaturas entre 20 y 30.
-        ax.set(xlim=(0, 100), ylim=(20, 30))
-        # Crea una línea roja vacía que se irá rellenando con los datos.
-        plot_line, = ax.plot([], [], 'r-')
+        figure = Figure(figsize=(6, 4.5), dpi=100)
+        ax = figure.add_subplot(211)        # Subgráfica superior: temperatura instantánea
+        ax_media = figure.add_subplot(212)  # Subgráfica inferior: media móvil de 10 muestras
+        figure.tight_layout(pad=2.0)
 
-        # Prepara el canvas: el puente que permite mostrar Matplotlib en Tkinter.
+        # Configura límites de ejes y etiquetas de ambas gráficas
+        ax.set(xlim=(0, 100), ylim=(20, 40), ylabel="Temp (°C)")
+        ax_media.set(xlim=(0, 100), ylim=(20, 40), ylabel="Media 10 (°C)", title="Media móvil (10 últimas)")
+
+        # Inicializa las líneas vacía roja (temperatura) y azul (media móvil)
+        plot_line, = ax.plot([], [], 'r-')
+        plot_line_media, = ax_media.plot([], [], 'b-')
+
+        # Incrusta la figura de Matplotlib dentro del marco de Tkinter
         canvas = FigureCanvasTkAgg(figure, master=graph_frame)
-        # Dibuja la figura inicial y obtiene el widget que Tkinter puede colocar.
         canvas.draw()
         canvas_graph = canvas.get_tk_widget()
-        # Define el tamaño inicial y coloca el canvas en el frame de la gráfica.
-        canvas_graph.config(width=600, height=300)
+        canvas_graph.config(width=600, height=450)
         canvas_graph.grid(row=0, column=0, padx=5, pady=5, sticky=N + S + E + W)
 
-    # Inicia las revisiones periódicas de la cola, pero solo una vez.
+    # Inicia el ciclo periódico de refresco de la gráfica
     if not actualizacion_programada:
         actualizacion_programada = True
         window.after(100, actualizar_grafica)
 
-    # Inicia un único hilo para leer el Arduino sin bloquear la interfaz.
+    # Lanza el hilo en segundo plano (daemon) encargado de escuchar el puerto serie
     if not recepcion_iniciada:
         threadRecepcion = threading.Thread(target=recepcion, daemon=True)
         threadRecepcion.start()
-        # Recuerda que el lector ya está funcionando para no iniciar otro hilo.
         recepcion_iniciada = True
 
     print('Recepció iniciada')
- 
-    
 
-def PaClick ():
-    # Envía al Arduino el comando para detener temporalmente la adquisición.
-    # El texto debe coincidir con el comando que el programa del Arduino reconoce.
-    mensaje = "Parar\n"
+
+# Acción del botón "Pausar": ordena al satélite detener el envío de datos (código 3)
+def PaClick():
+    mensaje = "3:\n"
     mySerial.write(mensaje.encode('utf-8'))
 
 
-def ReClick ():
-    # Envía al Arduino el comando para reanudar la adquisición de datos.
-    mensaje = "Reanudar\n"
+# Acción del botón "Reanudar": ordena al satélite volver a enviar datos (código 4)
+def ReClick():
+    mensaje = "4:\n"
     mySerial.write(mensaje.encode('utf-8'))
 
 
-# Crea la ventana principal, que contendrá todos los demás elementos.
+# Acción del botón "Aplicar configuración": envía al satélite el modo de cálculo y el nuevo límite
+def AplicarConfigClick():
+    global limite_temp, consecutivas_sup
+    try:
+        limite_temp = float(limiteEntry.get())  # Lee y convierte a decimal el límite escrito por el usuario
+    except ValueError:
+        messagebox.showerror("Error", "Introduce un número válido para el límite.")
+        return
+
+    consecutivas_sup = 0
+    modo = modo_calculo.get()                        # 0 = calcular en tierra, 1 = calcular en satélite
+    mySerial.write(f"9:{modo}\n".encode('utf-8'))    # Envía código 9 para fijar dónde se calcula la media
+    time.sleep(0.05)                                 # Pequeña pausa para no saturar el puerto serie entre tramas
+    mySerial.write(f"10:{limite_temp}\n".encode('utf-8'))  # Envía código 10 con la nueva temperatura límite
+    print(f"Configuración aplicada -> Modo: {'Satélite' if modo == 1 else 'Tierra'}, Límite: {limite_temp}")
+
+
+# --- CONSTRUCCIÓN DE LA INTERFAZ GRÁFICA (TKINTER) ---
 window = Tk()
-window.geometry("1200x600")
-# La ventana usa filas y columnas. El peso permite que se expandan al cambiar
-# el tamaño de la ventana.
+window.geometry("1200x650")  # Tamaño inicial de la ventana principal
+
+# Configuración de pesos de filas y columnas para que la ventana sea adaptable
 window.rowconfigure(0, weight=1)
 window.rowconfigure(1, weight=1)
+window.rowconfigure(2, weight=1)
 
 window.columnconfigure(0, weight=1)
 window.columnconfigure(1, weight=1)
 window.columnconfigure(2, weight=1)
 window.columnconfigure(3, weight=10)
 
-# Crea el texto del título y lo coloca en la cuadrícula de la ventana.
-tituloLabel = Label(window, text = "Mando de sensor de temperatura", font=("Courier", 20, "italic"))
+# Título superior izquierdo
+tituloLabel = Label(window, text="Mando de sensor de temperatura", font=("Courier", 20, "italic"))
 tituloLabel.grid(row=0, column=0, columnspan=1, padx=5, pady=5, sticky=N + S + E + W)
 
-# Crea un recuadro con título para agrupar los botones de control.
-button_graph_frame = LabelFrame(window, text ='Botones de control de la gráfica')
+# Panel de botones de control (Iniciar, Pausar, Reanudar)
+button_graph_frame = LabelFrame(window, text='Botones de control de la gráfica')
 button_graph_frame.grid(row=1, column=0, columnspan=1, padx=5, pady=5, sticky=N + S + E + W)
-# Hace que las tres columnas del recuadro puedan repartirse el espacio.
 button_graph_frame.rowconfigure(0, weight=1)
 button_graph_frame.columnconfigure(0, weight=1)
 button_graph_frame.columnconfigure(1, weight=1)
 button_graph_frame.columnconfigure(2, weight=1)
 
-# Crea los botones. "command" indica qué función se ejecutará al hacer clic.
-InButton = Button(button_graph_frame, text="Iniciar", bg='lime', fg="black",command=InClick)
+InButton = Button(button_graph_frame, text="Iniciar", bg='lime', fg="black", command=InClick)
 InButton.grid(row=0, column=0, padx=5, pady=5, sticky=N + S + E + W)
 
-PaButton = Button(button_graph_frame, text="Pausar", bg='red', fg="black",command=PaClick)
+PaButton = Button(button_graph_frame, text="Pausar", bg='red', fg="black", command=PaClick)
 PaButton.grid(row=0, column=1, padx=5, pady=5, sticky=N + S + E + W)
 
-ReButton = Button(button_graph_frame, text="Reanudar", bg='orange', fg="black",command=ReClick)
+ReButton = Button(button_graph_frame, text="Reanudar", bg='orange', fg="black", command=ReClick)
 ReButton.grid(row=0, column=2, padx=5, pady=5, sticky=N + S + E + W)
 
-# Crea el recuadro para la gráfica. Al abrir la ventana estará vacío:
-# el canvas se añade al recuadro al pulsar "Iniciar".
-graph_frame = LabelFrame(window, text ='Gráfica')
-# Coloca el recuadro a la derecha y permite que crezca con la ventana.
-graph_frame.grid(row=0, column=1, columnspan=3, rowspan=2, padx=5, pady=5, sticky=N + S + E + W)
-# Permite que el canvas ocupe el espacio disponible dentro del recuadro.
+# Panel de configuración de dónde se calcula la media y temperatura límite
+config_frame = LabelFrame(window, text='Configuración Media y Alarma')
+config_frame.grid(row=2, column=0, columnspan=1, padx=5, pady=5, sticky=N + S + E + W)
+config_frame.columnconfigure(0, weight=1)
+config_frame.columnconfigure(1, weight=1)
+
+modo_calculo = IntVar(value=0)  # Variable vinculada a los botones de opción (0 por defecto: Tierra)
+RadioTierra = Radiobutton(config_frame, text="Calcular en Tierra (Python)", variable=modo_calculo, value=0)
+RadioTierra.grid(row=0, column=0, columnspan=2, sticky=W, padx=5, pady=2)
+
+RadioSatelite = Radiobutton(config_frame, text="Calcular en Satélite (Arduino)", variable=modo_calculo, value=1)
+RadioSatelite.grid(row=1, column=0, columnspan=2, sticky=W, padx=5, pady=2)
+
+Label(config_frame, text="Temp. límite (°C):").grid(row=2, column=0, sticky=W, padx=5, pady=5)
+limiteEntry = Entry(config_frame, width=10)
+limiteEntry.insert(0, "30.0")  # Valor inicial por defecto en la caja de texto
+limiteEntry.grid(row=2, column=1, sticky=W, padx=5, pady=5)
+
+AplicarButton = Button(config_frame, text="Aplicar configuración", bg='lightblue', command=AplicarConfigClick)
+AplicarButton.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky=E + W)
+
+# Panel derecho reservado para incrustar las gráficas de temperatura y media móvil
+graph_frame = LabelFrame(window, text='Gráfica')
+graph_frame.grid(row=0, column=1, columnspan=3, rowspan=3, padx=5, pady=5, sticky=N + S + E + W)
 graph_frame.rowconfigure(0, weight=1)
 graph_frame.columnconfigure(0, weight=1)
 
-# Inicia el bucle de Tkinter: muestra la ventana y espera clics y otros eventos.
-window.mainloop()
+window.after(200, revisar_alarmas)  # Arranca el supervisor periódico de alarmas
+window.mainloop()                   # Inicia el bucle principal de eventos de la ventana
