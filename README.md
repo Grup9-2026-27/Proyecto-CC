@@ -1,3 +1,10 @@
+INTRODUCCIÓN:
+
+Somos el grupo 9, integrado por Pau Gabrysiak, Néstor Lombarte e Irati Vinyets. Esta entrega es la Versión 1 del proyecto realizado en clase.
+
+<img width="303.2" height="202.4" alt="IMG_4285" src="https://github.com/user-attachments/assets/50ac5124-b5fe-4102-b2ae-ab16fe377565" />
+
+
 INFORMACIÓN SOBRE LA ENTREGA:
 
 El objetivo de este proyecto es desarrollar una simulación de un sistema de comunicación entre un satélite y una estación de tierra mediante el uso de programación en Python y Arduino. El sistema permite simular el envío de información sobre las condiciones de temperatura y humedad del satélite, así como la comunicación entre ambos dispositivos.
@@ -59,8 +66,14 @@ El uso de la IA se ha estructurado en los siguientes puntos clave:
 
 - Detección de errores: Utilizamos la IA como asistente de depuración cuando el código presentaba fallos. La IA nos ayudó a identificar posibles orígenes del problema y nos ofreció alternativas para solucionarlos.
 
+- Comentarios: Hemos utilizado la Inteligencia Artificial para ayudarnos a redactar los comentarios del código de Python ya que, debido a su complejidad, consideramos que requería explicaciones detalladas. Para ello, hemos consultado el funcionamiento de algunas funciones y utilizado las explicaciones obtenidas para documentar el código de forma clara y extensa, facilitando su comprensión.
+
 En conclusión, la Inteligencia Artificial ha actuado como una herramienta de ayuda cuando encontrábamos errores de código y nos ha permitido entender en profundidad el funcionamiento de este.
 
 ENLACE DE VÍDEO
 
+<<<<<<< HEAD
 
+=======
+https://drive.google.com/file/d/1pXefoQ6epbVQrOdJW47xA1U6bL2vYG8u/view?usp=drive_link
+>>>>>>> 227d6c8f2b837f2b71ab43c51590d81087f7b799
