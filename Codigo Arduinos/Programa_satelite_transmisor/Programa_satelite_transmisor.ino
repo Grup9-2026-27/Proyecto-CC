@@ -62,6 +62,10 @@ void enviarMensaje(String msg) {
   mySerial.println(msg);        // Envía el string de datos hacia la estación de tierra
   miServo.attach(SERVOPIN);     // Vuelve a conectar el servo al pin PWM
   miServo.write(anguloActual);  // Restaura inmediatamente la posición en la que estaba el servo
+
+  digitalWrite(ledtr, HIGH);                    // Enciende el LED para indicar que se transmitió un dato válido
+    ledEncendido = true;                          // Marca el LED como encendido
+    nextMillisLed = millis() + 100;               // Programa el apagado del LED tras 100 ms
 }
 
 void setup() {
@@ -165,10 +169,6 @@ void loop() {
           }
         } else {                            // Si el cálculo de media se realiza en tierra (orden 9:0)
           enviarMensaje("1:" + String(t) + ":" + String(h));  // Envía trama estándar con temperatura y humedad
-
-          digitalWrite(ledtr, HIGH);        // Enciende el LED para indicar visualmente el envío de datos
-          ledEncendido = true;              // Marca el LED como encendido
-          nextMillisLed = millis() + 100;   // Programa el apagado del LED tras 100 ms
         }
 
       }
@@ -224,10 +224,6 @@ void loop() {
     } else {                                        // Si la medición de distancia es válida
       esperandoTimeoutDist = false;                 // Cancela cualquier cuenta atrás de fallo del ultrasónico
       enviarMensaje("11:" + String(anguloActual) + ":" + String(d));  // Envía código 11 con ángulo y distancia en cm
-
-      digitalWrite(ledtr, HIGH);                    // Enciende el LED para indicar que se transmitió un dato válido
-      ledEncendido = true;                          // Marca el LED como encendido
-      nextMillisLed = millis() + 100;               // Programa el apagado del LED tras 100 ms
     }
 
     estadoUltrasonico = 0;                           // Reinicia la máquina de estados del sensor ultrasónico

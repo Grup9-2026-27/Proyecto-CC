@@ -3,21 +3,20 @@
 SoftwareSerial mySerial(10, 11); // RX, TX 
 
 const int ledre = 13;        // LED en el pin 13 
+long nextMillisLed;          // Momento (en ms) en que se debe apagar el LED de recepción
+bool ledEncendido = false;   // Indica si el LED de recepción está encendido esperando a apagarse
+
 const int ledFalloDist = 8;  // LED de alarma para el sensor de distancia
 const int ledFallo = 7;      // LED de alarma para el sensor DHT11
 const int ledCom = 6;        // LED de alarma de comunicación
 
-const int buzzer = 5;        // Zumbador activo en el pin 5
-
-long nextMillisLed;          // Momento (en ms) en que se debe apagar el LED de recepción
-bool ledEncendido = false;   // Indica si el LED de recepción está encendido esperando a apagarse
-
 bool esperandoCom = false;   // Indica si estamos vigilando el tiempo máximo sin recibir tramas
 long nextTimeoutCom;         // Momento (en ms) límite antes de declarar pérdida de comunicación (5 s)
-
 bool alarmaSensor = false;  // Indica si la alarma del DHT11 ya está activada
 bool alarmaDist = false;    // Indica si la alarma del sensor de distancia ya está activada
 bool comCaida = false;      // Indica si la comunicación ha caído
+
+const int buzzer = 5;        // Zumbador activo en el pin 5
 
 void setup() {  
   mySerial.begin(9600);  // Inicia la comunicación serie con el satélite a 9600 baudios
