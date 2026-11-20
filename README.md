@@ -1,6 +1,6 @@
 INTRODUCCIÓN:
 
-Somos el grupo 9, integrado por Pau Gabrysiak, Néstor Lombarte e Irati Vinyets. Esta entrega es la Versión 1 del proyecto realizado en clase.
+Somos el grupo 9, integrado por Pau Gabrysiak, Néstor Lombarte e Irati Vinyets. Esta entrega es la Versión 2 del proyecto realizado en clase.
 
 <img width="303.2" height="202.4" alt="IMG_4285" src="https://github.com/user-attachments/assets/50ac5124-b5fe-4102-b2ae-ab16fe377565" />
 
@@ -72,8 +72,3 @@ En conclusión, la Inteligencia Artificial ha actuado como una herramienta de ay
 
 ENLACE DE VÍDEO
 
-<<<<<<< HEAD
-
-=======
-https://drive.google.com/file/d/1pXefoQ6epbVQrOdJW47xA1U6bL2vYG8u/view?usp=drive_link
->>>>>>> 227d6c8f2b837f2b71ab43c51590d81087f7b799
